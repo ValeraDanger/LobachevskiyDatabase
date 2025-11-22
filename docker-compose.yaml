@@ -1,0 +1,96 @@
+services:
+  postgres:
+    image: postgres:16
+    env_file:
+      - .env
+      - ./BackendPart/.env
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_HOST_AUTH_METHOD: md5
+    ports:
+      - "${MAKE_DB_PORT}:${DB_PORT}"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  smart-docs-api:
+    image: smart-docs-api
+    container_name: smart-docs-api
+    build:
+      context: ./BackendPart
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - ./BackendPart/.env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_MIN_POOL_SIZE: 1
+      DB_MAX_POOL_SIZE: 10
+
+      DOC_STORAGE_DIR: /app/storage/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-network
+    ports:
+      - "0.0.0.0:8000:8000"
+    volumes:
+      - documents-storage:/app/storage/documents
+
+  rag-api:
+    image: rag-api
+    container_name: rag-api
+    build:
+      context: ./MLPart
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+      - ./MLPart/.env
+    environment:
+      INPUT_FOLDER: /app/storage/documents
+      TEXT_OUTPUT_FOLDER: /app/logs/ocr_texts
+    depends_on:
+      - qdrant
+    networks:
+      - app-network
+    ports:
+      - "8080:8080"
+    volumes:
+      - documents-storage:/app/storage/documents
+      - rag-logs:/app/logs
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    networks:
+      - app-network
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant-storage:/qdrant/storage
+
+networks:
+  app-network:
+    name: app-network
+    driver: bridge
+
+volumes:
+  postgres-data:
+    name: postgres-data
+  documents-storage:
+    name: documents-storage
+  qdrant-storage:
+    name: qdrant-storage
+  rag-logs:
+    name: rag-logs
